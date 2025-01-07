@@ -1,0 +1,33 @@
+[project]
+name = "pgpow"
+version = "0.1"
+description = "A command line toolkit for working with PostgreSQL."
+readme = "README.md"
+authors = [{name = "Rob Young"}]
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+classifiers = [
+    "License :: OSI Approved :: Apache Software License"
+]
+dependencies = [
+    "click"
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+Homepage = "https://github.com/robyoung/pgpow"
+Changelog = "https://github.com/robyoung/pgpow/releases"
+Issues = "https://github.com/robyoung/pgpow/issues"
+CI = "https://github.com/robyoung/pgpow/actions"
+
+[project.scripts]
+pgpow = "pgpow.cli:cli"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.uv]
+dev-dependencies = ["pytest"]
