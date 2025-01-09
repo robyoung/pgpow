@@ -1,19 +1,7 @@
 import click
 
 
-from typing import Literal, Optional
-
-
-def connection_options(func):
-    func = click.option(
-        "-x", "--execute", is_flag=True, help="Execute query instead of printing"
-    )(func)
-    func = click.option("-c", "--connection", help="PostgreSQL connection string")(func)
-    func = click.option("--host", help="Database server host")(func)
-    func = click.option("--port", type=int, help="Database server port")(func)
-    func = click.option("--user", help="Database user")(func)
-    func = click.option("--dbname", help="Database name")(func)
-    return func
+from typing import Literal
 
 
 @click.group()
@@ -25,27 +13,10 @@ def cli():
 
 
 @cli.group()
-@connection_options
 @click.pass_context
-def query(
-    ctx,
-    execute: bool,
-    connection: Optional[str],
-    host: Optional[str],
-    port: Optional[int],
-    user: Optional[str],
-    dbname: Optional[str],
-):
+def query(ctx):
     """Query commands for PostgreSQL administration."""
-    # Store connection options in the context for sub-commands
-    ctx.obj = {
-        "execute": execute,
-        "connection": connection,
-        "host": host,
-        "port": port,
-        "user": user,
-        "dbname": dbname,
-    }
+    pass
 
 
 @query.group()
@@ -73,7 +44,11 @@ def long_running(
     min_transaction_duration: str | None,
     order_by: Literal["transaction", "query"],
 ):
-    """Show long-running transactions and queries."""
+    """Show long-running transactions and queries.
+
+    See:
+    - `pg_stat_activity` https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW
+    """
     # TODO: consider using https://github.com/shssoichiro/sqlformat-rs to format queries for printing
     columns = """
         pid,
@@ -93,7 +68,9 @@ def long_running(
 
     where = ""
     if min_query_duration and min_transaction_duration:
-        raise click.UsageError("Cannot specify both --min-query-duration and --min-transaction-duration")
+        raise click.UsageError(
+            "Cannot specify both --min-query-duration and --min-transaction-duration"
+        )
     elif min_query_duration:
         where = f"AND now() - query_start > interval '{min_query_duration}'"
     elif min_transaction_duration:
@@ -101,8 +78,7 @@ def long_running(
 
     _order_by = "txn_duration" if order_by == "transaction" else "query_duration"
 
-
-    _query_tpl = f"""
+    query = f"""
     SELECT
         {columns}
     FROM pg_stat_activity
@@ -111,16 +87,92 @@ def long_running(
         {where}
     ORDER BY {_order_by} DESC;
     """
-    if not ctx.obj["execute"]:
-        print(_query_tpl)
+    print(query)
 
 
 @activity.command()
-@click.option("--min-duration", default="5m", help="Minimum blocking duration")
+@click.option("--min-duration", default=None, help="Minimum blocking duration")
+@click.option("--compact", is_flag=True, help="Show compact view without query text")
 @click.pass_context
-def blocking(ctx, min_duration: str):
-    """Show blocking queries."""
-    pass
+def blocked(ctx, min_duration: str, compact: bool):
+    """Show queries that are currently blocked.
+
+    See:
+    - `pg_stat_activity` https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW
+    - `pg_blocking_pids` https://www.postgresql.org/docs/17/functions-info.html#FUNCTIONS-INFO-SESSION
+    """
+
+    activity_columns = """
+        blocked.pid,
+        blocked.usename,
+        blocked.application_name,
+        now() - blocked.query_start as query_duration
+    """
+    blocking_columns = """,
+        blocking.pid as blocking_pid,
+        blocking.application_name as blocking_app_name,
+        now() - blocking.query_start as blocking_duration
+    """
+    if not compact:
+        activity_columns += """,
+        blocked.query
+        """
+        blocking_columns += """,
+        blocking.query as blocking_query
+        """
+
+    columns = activity_columns + blocking_columns
+
+    if min_duration:
+        where = f"WHERE now() - blocked.query_start > interval '{min_duration}'"
+    else:
+        where = ""
+
+    query = f"""
+    SELECT
+        {columns}
+    FROM pg_stat_activity blocked
+    JOIN pg_stat_activity blocking ON blocking.pid = ANY(pg_blocking_pids(blocked.pid))
+    {where}
+    ORDER BY query_duration DESC;
+    """
+    print(query)
+
+
+@activity.command()
+@click.option("--pid", type=int, help="Filter by specific process ID")
+@click.option(
+    "--granted/--not-granted",
+    is_flag=True,
+    default=None,
+    help="Filter by granted or waiting locks",
+)
+@click.option("--compact", is_flag=True, help="Show compact view without query text")
+@click.pass_context
+def locks(ctx, pid: int | None, granted: bool | None, compact: bool):
+    """Show detailed lock information for sessions.
+
+    See:
+    - https://www.postgresql.org/docs/current/view-pg-locks.html
+    """
+    where_clauses = []
+    if granted is not None:
+        where_clauses.append("granted" if granted else "not granted")
+    if pid:
+        where_clauses.append(f"pid = {pid}")
+
+    if where_clauses:
+        where = "WHERE " + " AND ".join(where_clauses)
+    else:
+        where = ""
+
+    query = f"""
+    SELECT
+        pg_locks.*
+    FROM pg_locks
+    {where}
+    """
+    print(query)
 
 
 @query.group()
