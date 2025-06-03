@@ -4,6 +4,15 @@ import click
 from typing import Literal
 
 
+# Shared options
+limit = lambda default: click.option("--limit", default=limit, help="Number of queries to show")
+
+def _add_limit(query: str, limit: str | int) -> str:
+    if limit != "":
+        query += f"\nLIMIT {limit}"
+    return query
+
+
 @click.group()
 @click.version_option()
 def cli():
@@ -15,14 +24,14 @@ def cli():
 @cli.group()
 @click.pass_context
 def query(ctx):
-    """Query commands for PostgreSQL administration."""
+    """Useful queries for PostgreSQL administration."""
     pass
 
 
 @query.group()
 @click.pass_context
 def activity(ctx):
-    """Commands related to database activity."""
+    """Queries related to database activity."""
     pass
 
 
@@ -83,9 +92,10 @@ def long_running(
         {columns}
     FROM pg_stat_activity
     WHERE xact_start IS NOT NULL
-        AND state != 'idle'
+        AND state <> 'idle'
+        AND pid <> pg_backend_pid()
         {where}
-    ORDER BY {_order_by} DESC;
+    ORDER BY {_order_by} DESC
     """
     print(query)
 
@@ -191,6 +201,8 @@ def bloat_check(ctx, schema: str, min_size: str):
     pass
 
 
+
+
 @query.group()
 @click.pass_context
 def performance(ctx):
@@ -199,9 +211,54 @@ def performance(ctx):
 
 
 @performance.command("frequent-patterns")
-@click.option("--limit", default=10, help="Number of queries to show")
+@limit(10)
 @click.option("--min-calls", default=1000, help="Minimum number of calls")
 @click.pass_context
 def frequent_patterns(ctx, limit: int, min_calls: int):
     """Show frequent query patterns."""
     pass
+
+
+@performance.command("indexes-used")
+@limit(10)
+@click.option("--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes")
+def indexes_used(limit: int | str, no_pkey: bool):
+    """Most used indexes"""
+    _no_pkey = "AND indexrelname NOT ILIKE '%_pkey'" if no_pkey else ""
+    query = f"""
+    SELECT
+        relname,
+        indexrelname,
+        idx_scan
+    FROM
+        pg_stat_all_indexes
+    WHERE
+        schemaname = 'public' AND idx_scan > 0 {_no_pkey}
+    ORDER BY
+        idx_scan DESC
+    """
+    query = _add_limit(query, limit)
+    
+    print(query)
+
+
+@performance.command("indexes-unused")
+@limit(10)
+def indexes_unused(limit: int):
+    """Unused indexes that may be candidates for removal"""
+    query = f"""
+    SELECT
+        schemaname,
+        relname,
+        indexrelname,
+        idx_scan,
+        pg_size_pretty(pg_relation_size(indexrelid)) AS index_size
+    FROM
+        pg_stat_all_indexes
+    WHERE
+        schemaname = 'public' AND idx_scan = 0
+    ORDER BY
+        pg_relation_size(indexrelid) DESC
+    """
+    query = _add_limit(query, limit)
+    print(query)
