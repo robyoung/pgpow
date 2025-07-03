@@ -5,7 +5,7 @@ from typing import Literal
 
 
 # Shared options
-limit = lambda default: click.option("--limit", default=limit, help="Number of queries to show")
+limit = lambda default: click.option("--limit", default=default, help="Number of queries to show")
 
 def _add_limit(query: str, limit: str | int) -> str:
     if limit != "":
@@ -193,13 +193,29 @@ def maintenance(ctx):
 
 
 @maintenance.command("bloat-check")
-@click.option("--schema", default="public", help="Schema to check")
 @click.option("--min-size", default="100MB", help="Minimum table size to check")
 @click.pass_context
 def bloat_check(ctx, schema: str, min_size: str):
     """Check for table bloat."""
     pass
 
+@maintenance.command("dead-tuples")
+@limit(30)
+def dead_tuples(limit: int | str):
+    """Show the tables with the highest proportion of dead tuples"""
+    query = """
+    SELECT
+      schemaname,
+      relname,
+      n_dead_tup,
+      n_live_tup,
+      ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup + n_dead_tup, 0), 2) AS dead_tuple_pct
+    FROM pg_stat_user_tables
+    WHERE schemaname = 'public'
+    ORDER BY dead_tuple_pct DESC NULLS LAST
+    """
+    query = _add_limit(query, limit)
+    print(query)
 
 
 
