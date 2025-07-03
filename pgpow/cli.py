@@ -5,7 +5,8 @@ from typing import Literal
 
 
 # Shared options
-limit = lambda default: click.option("--limit", default=default, help="Number of queries to show")
+def limit(default:int):
+    return click.option("--limit", default=default, help="Number of queries to show")
 
 def _add_limit(query: str, limit: str | int) -> str:
     if limit != "":
@@ -209,6 +210,20 @@ def dead_tuples(limit: int | str):
     query = _add_limit(query, limit)
     print(query)
 
+@maintenance.command("table-size")
+@limit(10)
+def table_size(limit: int | str):
+    """Show the largest tables by size"""
+    query = """
+    SELECT
+      table_schema || '.' || table_name AS table_full_name,
+      pg_size_pretty(pg_total_relation_size(quote_ident(table_schema) || '.' || quote_ident(table_name))) AS total_size
+    FROM information_schema.tables
+    WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY pg_total_relation_size(quote_ident(table_schema) || '.' || quote_ident(table_name)) DESC
+    """
+    query = _add_limit(query, limit)
+    print(query)
 
 
 @query.group()
@@ -252,7 +267,7 @@ def indexes_used(limit: int | str, no_pkey: bool):
 @limit(10)
 def indexes_unused(limit: int):
     """Unused indexes that may be candidates for removal"""
-    query = f"""
+    query = """
     SELECT
         schemaname,
         relname,
