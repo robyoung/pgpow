@@ -22,15 +22,13 @@ def cli():
 
 
 @cli.group()
-@click.pass_context
-def query(ctx):
+def query():
     """Useful queries for PostgreSQL administration."""
     pass
 
 
 @query.group()
-@click.pass_context
-def activity(ctx):
+def activity():
     """Queries related to database activity."""
     pass
 
@@ -45,9 +43,7 @@ def activity(ctx):
     help="Order by transaction or query duration",
 )
 @click.option("--compact", is_flag=True, help="Show compact view without query text")
-@click.pass_context
 def long_running(
-    ctx,
     compact: bool,
     min_query_duration: str | None,
     min_transaction_duration: str | None,
@@ -103,8 +99,7 @@ def long_running(
 @activity.command()
 @click.option("--min-duration", default=None, help="Minimum blocking duration")
 @click.option("--compact", is_flag=True, help="Show compact view without query text")
-@click.pass_context
-def blocked(ctx, min_duration: str, compact: bool):
+def blocked(min_duration: str, compact: bool):
     """Show queries that are currently blocked.
 
     See:
@@ -158,8 +153,7 @@ def blocked(ctx, min_duration: str, compact: bool):
     help="Filter by granted or waiting locks",
 )
 @click.option("--compact", is_flag=True, help="Show compact view without query text")
-@click.pass_context
-def locks(ctx, pid: int | None, granted: bool | None, compact: bool):
+def locks(pid: int | None, granted: bool | None, compact: bool):
     """Show detailed lock information for sessions.
 
     See:
@@ -186,16 +180,14 @@ def locks(ctx, pid: int | None, granted: bool | None, compact: bool):
 
 
 @query.group()
-@click.pass_context
-def maintenance(ctx):
+def maintenance():
     """Database maintenance commands."""
     pass
 
 
 @maintenance.command("bloat-check")
 @click.option("--min-size", default="100MB", help="Minimum table size to check")
-@click.pass_context
-def bloat_check(ctx, schema: str, min_size: str):
+def bloat_check(schema: str, min_size: str):
     """Check for table bloat."""
     pass
 
@@ -220,8 +212,7 @@ def dead_tuples(limit: int | str):
 
 
 @query.group()
-@click.pass_context
-def performance(ctx):
+def performance():
     """Database performance commands."""
     pass
 
@@ -229,8 +220,7 @@ def performance(ctx):
 @performance.command("frequent-patterns")
 @limit(10)
 @click.option("--min-calls", default=1000, help="Minimum number of calls")
-@click.pass_context
-def frequent_patterns(ctx, limit: int, min_calls: int):
+def frequent_patterns(limit: int, min_calls: int):
     """Show frequent query patterns."""
     pass
 
@@ -254,7 +244,7 @@ def indexes_used(limit: int | str, no_pkey: bool):
         idx_scan DESC
     """
     query = _add_limit(query, limit)
-    
+
     print(query)
 
 
