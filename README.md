@@ -13,16 +13,16 @@ Install this tool using `pip`:
 ```bash
 pip install pgpow
 ```
+
+You can install completions for your shell using the [click instructions](https://click.palletsprojects.com/en/stable/shell-completion/).
+
 ## Usage
 
 For help, run:
 ```bash
 pgpow --help
 ```
-You can also use:
-```bash
-python -m pgpow --help
-```
+
 ## Development
 
 To contribute to this tool, first checkout the code. Then create a new virtual environment:
