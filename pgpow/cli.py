@@ -5,8 +5,17 @@ from typing import Literal
 
 
 # Shared options
-def limit(default:int):
-    return click.option("--limit", default=default, help="Number of queries to show")
+def limit(default: int):
+    """Add a limit option to commands.
+
+    To disable the limit, pass no value (e.g., `--limit=`).
+    """
+    return click.option(
+        "--limit",
+        default=str(default),
+        help="Number of queries to show. Disable by passing no value.",
+    )
+
 
 def _add_limit(query: str, limit: str | int) -> str:
     if limit != "":
@@ -26,6 +35,45 @@ def cli():
 def query():
     """Useful queries for PostgreSQL administration."""
     pass
+
+
+@query.command()
+@click.option("--table", help="Table to query")
+@click.option("--hide-query", is_flag=True, help="Hide the query text in the output")
+@limit(10)
+def statements(limit: str | int, table: str | None, hide_query: bool):
+    """Show queries from `pg_stat_statements`
+
+    Requires the `pg_stat_statements` extension to be enabled.
+
+    Enable with `CREATE EXTENSION pg_stat_statements;`
+
+    See: https://www.postgresql.org/docs/current/pgstatstatements.html
+    """
+    if table:
+        where = f"WHERE query ILIKE '%{table}%'"
+    else:
+        where = ""
+
+    _select_query = "query, " if not hide_query else ""
+
+    query = f"""
+    SELECT
+        queryid,
+        {_select_query}
+        calls,
+        rows,
+        total_exec_time,
+        mean_exec_time,
+        stddev_exec_time,
+        min_exec_time,
+        max_exec_time
+    FROM pg_stat_statements
+    {where}
+    ORDER BY total_exec_time DESC
+    """
+    query = _add_limit(query, limit)
+    print(query)
 
 
 @query.group()
@@ -192,6 +240,7 @@ def bloat_check(schema: str, min_size: str):
     """Check for table bloat."""
     pass
 
+
 @maintenance.command("dead-tuples")
 @limit(30)
 def dead_tuples(limit: int | str):
@@ -209,6 +258,7 @@ def dead_tuples(limit: int | str):
     """
     query = _add_limit(query, limit)
     print(query)
+
 
 @maintenance.command("table-size")
 @limit(10)
@@ -235,22 +285,24 @@ def performance():
 @performance.command("frequent-patterns")
 @limit(10)
 @click.option("--min-calls", default=1000, help="Minimum number of calls")
-def frequent_patterns(limit: int, min_calls: int):
+def frequent_patterns(limit: int | str, min_calls: int):
     """Show frequent query patterns."""
     pass
 
 
 @performance.command("indexes-used")
 @limit(10)
-@click.option("--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes")
+@click.option(
+    "--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes"
+)
 def indexes_used(limit: int | str, no_pkey: bool):
     """Most used indexes"""
     _no_pkey = "AND indexrelname NOT ILIKE '%_pkey'" if no_pkey else ""
     query = f"""
     SELECT
-        relname,
-        indexrelname,
-        idx_scan
+        relname AS table,
+        indexrelname AS index,
+        idx_scan AS index_scans,
     FROM
         pg_stat_all_indexes
     WHERE
@@ -265,14 +317,14 @@ def indexes_used(limit: int | str, no_pkey: bool):
 
 @performance.command("indexes-unused")
 @limit(10)
-def indexes_unused(limit: int):
+def indexes_unused(limit: int | str):
     """Unused indexes that may be candidates for removal"""
     query = """
     SELECT
-        schemaname,
-        relname,
-        indexrelname,
-        idx_scan,
+        schemaname AS schema,
+        relname AS table,
+        indexrelname AS index,
+        idx_scan AS index_scans,
         pg_size_pretty(pg_relation_size(indexrelid)) AS index_size
     FROM
         pg_stat_all_indexes
@@ -282,4 +334,50 @@ def indexes_unused(limit: int):
         pg_relation_size(indexrelid) DESC
     """
     query = _add_limit(query, limit)
+    print(query)
+
+
+@performance.command("index-utilization")
+@click.option(
+    "--order-by",
+    type=click.Choice(["rows", "index"]),
+    default="rows",
+    help="Order by rows or index scans",
+)
+@click.option(
+    "--rows",
+    default=None,
+    type=int,
+    help="Minimum number of rows",
+)
+@limit(10)
+def index_utilization(limit: int | str, order_by: str, rows: int | None):
+    """Check whether queries are scanning efficiently"""
+    query = """
+    SELECT relname AS table,
+           n_live_tup AS rows,
+           round(100*idx_scan/nullif(idx_scan+seq_scan,0),2) AS idx_percent
+    FROM   pg_stat_user_tables
+    """
+    if rows is not None:
+        query += f"WHERE n_live_tup >= {rows} "
+    if order_by == "rows":
+        query += "ORDER BY n_live_tup DESC "
+    elif order_by == "index":
+        query += "ORDER BY idx_percent ASC "
+    else:
+        raise click.UsageError("Invalid order_by option. Choose 'rows' or 'index'.")
+
+    query = _add_limit(query, limit)
+    print(query)
+
+
+@performance.command("cache-hit-ratio")
+def cache_hit_ratio():
+    """Show ratio of cache hits to total accesses"""
+    query = """
+    SELECT round(100*sum(heap_blks_hit)::numeric /
+                nullif(sum(heap_blks_hit+heap_blks_read),0),2) AS hit_ratio
+    FROM pg_statio_user_tables
+    """
     print(query)
