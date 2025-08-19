@@ -5,8 +5,9 @@ from typing import Literal
 
 
 # Shared options
-def limit(default:int):
+def limit(default: int):
     return click.option("--limit", default=default, help="Number of queries to show")
+
 
 def _add_limit(query: str, limit: str | int) -> str:
     if limit != "":
@@ -192,6 +193,7 @@ def bloat_check(schema: str, min_size: str):
     """Check for table bloat."""
     pass
 
+
 @maintenance.command("dead-tuples")
 @limit(30)
 def dead_tuples(limit: int | str):
@@ -209,6 +211,7 @@ def dead_tuples(limit: int | str):
     """
     query = _add_limit(query, limit)
     print(query)
+
 
 @maintenance.command("table-size")
 @limit(10)
@@ -242,15 +245,17 @@ def frequent_patterns(limit: int, min_calls: int):
 
 @performance.command("indexes-used")
 @limit(10)
-@click.option("--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes")
+@click.option(
+    "--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes"
+)
 def indexes_used(limit: int | str, no_pkey: bool):
     """Most used indexes"""
     _no_pkey = "AND indexrelname NOT ILIKE '%_pkey'" if no_pkey else ""
     query = f"""
     SELECT
-        relname,
-        indexrelname,
-        idx_scan
+        relname AS table,
+        indexrelname AS index,
+        idx_scan AS index_scans,
     FROM
         pg_stat_all_indexes
     WHERE
@@ -269,10 +274,10 @@ def indexes_unused(limit: int):
     """Unused indexes that may be candidates for removal"""
     query = """
     SELECT
-        schemaname,
-        relname,
-        indexrelname,
-        idx_scan,
+        schemaname AS schema,
+        relname AS table,
+        indexrelname AS index,
+        idx_scan AS index_scans,
         pg_size_pretty(pg_relation_size(indexrelid)) AS index_size
     FROM
         pg_stat_all_indexes
@@ -282,4 +287,50 @@ def indexes_unused(limit: int):
         pg_relation_size(indexrelid) DESC
     """
     query = _add_limit(query, limit)
+    print(query)
+
+
+@performance.command("index-utilization")
+@click.option(
+    "--order-by",
+    type=click.Choice(["rows", "index"]),
+    default="rows",
+    help="Order by rows or index scans",
+)
+@click.option(
+    "--rows",
+    default=None,
+    type=int,
+    help="Minimum number of rows",
+)
+@limit(10)
+def index_utilization(limit: int | str, order_by: str, rows: int | None):
+    """Check whether queries are scanning efficiently"""
+    query = """
+    SELECT relname AS table,
+           n_live_tup AS rows,
+           round(100*idx_scan/nullif(idx_scan+seq_scan,0),2) AS idx_percent
+    FROM   pg_stat_user_tables
+    """
+    if rows is not None:
+        query += f"WHERE n_live_tup >= {rows} "
+    if order_by == "rows":
+        query += "ORDER BY n_live_tup DESC "
+    elif order_by == "index":
+        query += "ORDER BY idx_percent ASC "
+    else:
+        raise click.UsageError("Invalid order_by option. Choose 'rows' or 'index'.")
+
+    query = _add_limit(query, limit)
+    print(query)
+
+
+@performance.command("cache-hit-ratio")
+def cache_hit_ratio():
+    """Show ratio of cache hits to total accesses"""
+    query = """
+    SELECT round(100*sum(heap_blks_hit)::numeric /
+                nullif(sum(heap_blks_hit+heap_blks_read),0),2) AS hit_ratio
+    FROM pg_statio_user_tables
+    """
     print(query)
