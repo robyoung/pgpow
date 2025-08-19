@@ -6,7 +6,15 @@ from typing import Literal
 
 # Shared options
 def limit(default: int):
-    return click.option("--limit", default=default, help="Number of queries to show")
+    """Add a limit option to commands.
+
+    To disable the limit, pass no value (e.g., `--limit=`).
+    """
+    return click.option(
+        "--limit",
+        default=str(default),
+        help="Number of queries to show. Disable by passing no value.",
+    )
 
 
 def _add_limit(query: str, limit: str | int) -> str:
@@ -27,6 +35,45 @@ def cli():
 def query():
     """Useful queries for PostgreSQL administration."""
     pass
+
+
+@query.command()
+@click.option("--table", help="Table to query")
+@click.option("--hide-query", is_flag=True, help="Hide the query text in the output")
+@limit(10)
+def statements(limit: str | int, table: str | None, hide_query: bool):
+    """Show queries from `pg_stat_statements`
+
+    Requires the `pg_stat_statements` extension to be enabled.
+
+    Enable with `CREATE EXTENSION pg_stat_statements;`
+
+    See: https://www.postgresql.org/docs/current/pgstatstatements.html
+    """
+    if table:
+        where = f"WHERE query ILIKE '%{table}%'"
+    else:
+        where = ""
+
+    _select_query = "query, " if not hide_query else ""
+
+    query = f"""
+    SELECT
+        queryid,
+        {_select_query}
+        calls,
+        rows,
+        total_exec_time,
+        mean_exec_time,
+        stddev_exec_time,
+        min_exec_time,
+        max_exec_time
+    FROM pg_stat_statements
+    {where}
+    ORDER BY total_exec_time DESC
+    """
+    query = _add_limit(query, limit)
+    print(query)
 
 
 @query.group()
@@ -238,7 +285,7 @@ def performance():
 @performance.command("frequent-patterns")
 @limit(10)
 @click.option("--min-calls", default=1000, help="Minimum number of calls")
-def frequent_patterns(limit: int, min_calls: int):
+def frequent_patterns(limit: int | str, min_calls: int):
     """Show frequent query patterns."""
     pass
 
@@ -270,7 +317,7 @@ def indexes_used(limit: int | str, no_pkey: bool):
 
 @performance.command("indexes-unused")
 @limit(10)
-def indexes_unused(limit: int):
+def indexes_unused(limit: int | str):
     """Unused indexes that may be candidates for removal"""
     query = """
     SELECT
