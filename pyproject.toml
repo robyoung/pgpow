@@ -42,4 +42,5 @@ dev-dependencies = [
     "mypy>=1.14.1",
     "pytest",
     "types-click>=7.1.8",
+    "ruff"
 ]
