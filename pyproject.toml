@@ -18,7 +18,8 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "click"
+    "click",
+    "rich>=14.1.0",
 ]
 
 [build-system]
@@ -42,7 +43,8 @@ dev-dependencies = [
     "mypy>=1.14.1",
     "pytest",
     "types-click>=7.1.8",
-    "ruff"
+    "ruff",
+    "ipdb"
 ]
 
 [tool.ruff]
