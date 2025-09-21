@@ -47,8 +47,7 @@ Execution Time: 129.345 ms
     assert plan == expected
 
 
-def test_parse_text_plan_with_one_child() -> None:
-    plan_text = """
+PLAN_WITH_CHILDREN = """
 GroupAggregate  (cost=23558.04..26145.55 rows=100 width=43) (actual time=93.905..126.623 rows=100 loops=1)
   Group Key: s.name
   Buffers: shared hit=500, temp read=899 written=904
@@ -69,6 +68,9 @@ Planning:
 Planning Time: 3.278 ms
 Execution Time: 129.345 ms
 """.strip()
+
+
+def test_parse_text_plan_with_children() -> None:
     expected = Plan(
         PlanNode(
             node_type="GroupAggregate",
@@ -138,9 +140,43 @@ Execution Time: 129.345 ms
         ],
     )
 
-    plan = parse_text_plan(plan_text)
+    plan = parse_text_plan(PLAN_WITH_CHILDREN)
 
     assert plan == expected
+
+
+def assert_approx_equal(actual: float | None, expected: float) -> None:
+    assert actual is not None and abs(actual - expected) < 0.01
+
+
+def test_self_costs() -> None:
+    plan = parse_text_plan(PLAN_WITH_CHILDREN)
+
+    root_node = plan.root
+    assert_approx_equal(root_node.self_cost, 26145.55 - 23989.13)
+    sort_node = root_node.children[0]
+    assert_approx_equal(sort_node.self_cost, 23989.13 - 4433.51)
+    hash_join_node = sort_node.children[0]
+    assert_approx_equal(hash_join_node.self_cost, 4433.51 - (819.0 + 1146.57))
+    seq_scan_node = hash_join_node.children[0]
+    assert_approx_equal(seq_scan_node.self_cost, 819.0)
+    hash_node = hash_join_node.children[1]
+    assert_approx_equal(hash_node.self_cost, 1146.57)
+
+
+def test_self_totals() -> None:
+    plan = parse_text_plan(PLAN_WITH_CHILDREN)
+
+    root_node = plan.root
+    assert_approx_equal(root_node.self_time, 126.623 - 102.804)
+    sort_node = root_node.children[0]
+    assert_approx_equal(sort_node.self_time, 102.804 - 53.756)
+    hash_join_node = sort_node.children[0]
+    assert_approx_equal(hash_join_node.self_time, 53.756 - (1.955 + 30.375))
+    seq_scan_node = hash_join_node.children[0]
+    assert_approx_equal(seq_scan_node.self_time, 1.955)
+    hash_node = hash_join_node.children[1]
+    assert_approx_equal(hash_node.self_time, 30.375)
 
 
 def test_parse_plan_line() -> None:

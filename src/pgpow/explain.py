@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Self, assert_never
+from typing import Callable, Self, assert_never
 
 
 @dataclass
@@ -30,6 +30,55 @@ class PlanNode:
     metadata: list[str] = field(default_factory=list)
     children: list[Self] = field(default_factory=list)
 
+    @property
+    def self_cost(self) -> float | None:
+        def _stats(node: PlanNode) -> tuple[float, int] | None:
+            if node.costs is None or node.costs.total is None:
+                return None
+            return node.costs.total, node.costs.rows
+
+        return self._self_cost(_stats)
+
+    @property
+    def self_time(self) -> float | None:
+        def _stats(node: PlanNode) -> tuple[float, int] | None:
+            if node.actuals is None or node.actuals.total_time is None:
+                return None
+            return node.actuals.total_time, node.actuals.loops
+
+        return self._self_cost(_stats)
+
+    def _self_cost(
+        self,
+        stats_func: Callable[[Self], tuple[float, int] | None],
+    ) -> float | None:
+        if (self_stats := stats_func(self)) is None:
+            return None
+        self_total, self_rows = self_stats
+
+        child_stats = list(filter(None, [stats_func(child) for child in self.children]))
+
+        if not child_stats:
+            return self_total
+
+        child_totals, child_rows = zip(*child_stats)
+
+        node_type = self.node_type
+
+        if node_type.endswith("Join"):
+            if "Merge" in node_type:
+                child_total = max(child_totals)
+            elif "Hash" in node_type:
+                child_total = sum(child_totals)
+            else:
+                raise ValueError("Unknown join type for self cost calculation")
+        elif self.node_type.endswith("Nested Loop"):
+            child_total = sum(ct * cr for ct, cr in zip(child_totals, child_rows))
+        else:
+            child_total = sum(child_totals)
+
+        return self_total - child_total
+
 
 @dataclass
 class Plan:
@@ -46,7 +95,7 @@ def parse_text_plan(data: str) -> Plan:
         lines = clean_headers_and_borders(lines)
         root_node = parse_plan_line(lines[0])
     path_to_root = [root_node]
-    tail = []
+    tail: list[str] = []
 
     for line in lines[1:]:
         if not line.startswith(" ") or len(tail) > 0:
