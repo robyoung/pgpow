@@ -249,7 +249,7 @@ def get_node_type_group(node: PlanNode) -> NodeTypeGroup:
 
 
 def get_node_type_icon(node: PlanNode) -> str:
-    match node.node_type:
+    match node.node_type.lstrip("Parallel "):
         case "Seq Scan":
             return "🔍"
         case "Index Scan" | "Index Only Scan":

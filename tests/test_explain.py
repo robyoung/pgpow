@@ -187,7 +187,9 @@ def test_parse_plan_line_no_target_or_costs() -> None:
 @pytest.mark.parametrize(
     "node_type,expected",
     [
+        pytest.param("Parallel Seq Scan", "🔍 [blue]Parallel Seq Scan[/blue]", id="para_seq_scan"),
         pytest.param("Seq Scan", "🔍 [blue]Seq Scan[/blue]", id="seq_scan"),
+        pytest.param("Invalid Seq Scan", "📂 [blue]Invalid Seq Scan[/blue]", id="inv_seq_scan"),
         pytest.param("Index Scan", "📖 [blue]Index Scan[/blue]", id="index_scan"),
         pytest.param("Sort", "↕️ [bright_black]Sort[/bright_black]", id="sort"),
         pytest.param("Insert", "✏️ [red]Insert[/red]", id="insert"),
