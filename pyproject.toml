@@ -5,7 +5,7 @@ description = "A command line toolkit for working with PostgreSQL."
 readme = "README.md"
 authors = [{name = "Rob Young"}]
 license = {text = "Apache-2.0"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Development Status :: 3 - Alpha",
