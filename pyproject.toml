@@ -38,13 +38,19 @@ pgpow = "pgpow.cli:cli"
 [project.optional-dependencies]
 test = ["pytest"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
+    "ipdb",
+    {include-group = "lint"},
+    {include-group = "test"},
+]
+lint = [
     "mypy>=1.14.1",
-    "pytest",
-    "types-click>=7.1.8",
     "ruff",
-    "ipdb"
+    "types-click>=7.1.8",
+]
+test = [
+    "pytest",
 ]
 
 [tool.ruff]
