@@ -36,6 +36,8 @@ Execution Time: 129.345 ms
                 "Buffers: shared hit=20",
             ],
             children=[],
+            cost_score=1.0,
+            time_score=1.0,
         ),
         tail=["Planning Time: 3.278 ms", "Execution Time: 129.345 ms"],
     )
@@ -259,7 +261,7 @@ Planning Time: 3.278 ms
 Execution Time: 129.345 ms
 """
     expected = """
-📖 [blue]Index Only Scan[/blue] using building_pkey on building b  (cost=0.15..0.45 rows=1 width=4) (actual time=0.003..0.003 rows=1 loops=11)
+📖 [blue]Index Only Scan[/blue] using building_pkey on building b  (cost=[bold #ff0000]0.15..0.45[/] rows=1 width=4) (actual time=[bold #ff0000]0.003..0.003[/] rows=1 loops=11)
   Index Cond: (id = rb.building_id)
   Heap Fetches: 10
   Buffers: shared hit=20

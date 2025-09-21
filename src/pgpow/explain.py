@@ -1,7 +1,10 @@
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from functools import cached_property
 from typing import Callable, Self, assert_never
+
+from rich.color import Color
 
 
 @dataclass
@@ -30,7 +33,10 @@ class PlanNode:
     metadata: list[str] = field(default_factory=list)
     children: list[Self] = field(default_factory=list)
 
-    @property
+    cost_score: float | None = field(default=None, compare=False, hash=False)
+    time_score: float | None = field(default=None, compare=False, hash=False)
+
+    @cached_property
     def self_cost(self) -> float | None:
         def _stats(node: PlanNode) -> tuple[float, int] | None:
             if node.costs is None or node.costs.total is None:
@@ -39,7 +45,7 @@ class PlanNode:
 
         return self._self_cost(_stats)
 
-    @property
+    @cached_property
     def self_time(self) -> float | None:
         def _stats(node: PlanNode) -> tuple[float, int] | None:
             if node.actuals is None or node.actuals.total_time is None:
@@ -47,6 +53,10 @@ class PlanNode:
             return node.actuals.total_time, node.actuals.loops
 
         return self._self_cost(_stats)
+
+    @property
+    def all_children(self) -> list[Self]:
+        return [self, *[c2 for c1 in self.children for c2 in c1.all_children]]
 
     def _self_cost(
         self,
@@ -65,15 +75,15 @@ class PlanNode:
 
         node_type = self.node_type
 
-        if node_type.endswith("Join"):
+        if "Nested Loop" in node_type:
+            child_total = sum(ct * cr for ct, cr in zip(child_totals, child_rows))
+        elif node_type.endswith("Join"):
             if "Merge" in node_type:
                 child_total = max(child_totals)
             elif "Hash" in node_type:
                 child_total = sum(child_totals)
             else:
-                raise ValueError("Unknown join type for self cost calculation")
-        elif self.node_type.endswith("Nested Loop"):
-            child_total = sum(ct * cr for ct, cr in zip(child_totals, child_rows))
+                raise ValueError(f"Unknown join type for self cost calculation: {node_type}")
         else:
             child_total = sum(child_totals)
 
@@ -84,6 +94,63 @@ class PlanNode:
 class Plan:
     root: PlanNode
     tail: list[str]
+
+    @cached_property
+    def min_cost(self) -> float:
+        return min(cost for node in self.root.all_children if (cost := node.self_cost) is not None)
+
+    @cached_property
+    def max_cost(self) -> float:
+        return max(cost for node in self.root.all_children if (cost := node.self_cost) is not None)
+
+    def cost_score(self, cost: float) -> float:
+        if self.max_cost == self.min_cost:
+            return 1.0
+
+        return (cost - self.min_cost) / (self.max_cost - self.min_cost)
+
+    @cached_property
+    def min_time(self) -> float | None:
+        return min((time for node in self.root.all_children if (time := node.self_time) is not None), default=None)
+
+    @cached_property
+    def max_time(self) -> float | None:
+        if self.root.actuals is None:
+            return None
+        return max((time for node in self.root.all_children if (time := node.self_time) is not None), default=None)
+
+    def time_score(self, time: float) -> float:
+        assert self.min_time is not None and self.max_time is not None
+        if self.max_time == self.min_time:
+            return 1.0
+        return (time - self.min_time) / (self.max_time - self.min_time)
+
+    def add_scores(self) -> None:
+        for node in self.root.all_children:
+            if (cost := node.self_cost) is not None:
+                node.cost_score = self.cost_score(cost)
+            if (time := node.self_time) is not None:
+                node.time_score = self.time_score(time)
+
+
+def calculate_colour(score: float) -> tuple[int, int, int]:
+    parts: tuple[float | int, float | int, float | int]
+    if score < 0.5:
+        score = score / 0.5
+        parts = (255 * score, 255, 0)
+        return _tweak_brightness(parts, 0.9)
+    else:
+        score = (score - 0.5) / 0.5
+        parts = (255, 255 * (1 - score), 0)
+        return _tweak_brightness(parts, 1)
+
+
+def _tweak_brightness(colour: tuple[float | int, float | int, float | int], brightness: float) -> tuple[int, int, int]:
+    return (
+        int(colour[0] * brightness),
+        int(colour[1] * brightness),
+        int(colour[2] * brightness),
+    )
 
 
 def parse_text_plan(data: str) -> Plan:
@@ -119,7 +186,9 @@ def parse_text_plan(data: str) -> Plan:
             # metadata line
             path_to_root[-1].metadata.append(line.strip())
 
-    return Plan(root=root_node, tail=tail)
+    plan = Plan(root=root_node, tail=tail)
+    plan.add_scores()
+    return plan
 
 
 def clean_headers_and_borders(lines: list[str]) -> list[str]:
@@ -243,14 +312,23 @@ def format_plan_line(node: PlanNode) -> str:
         parts.append(f" {node.target}")
 
     if node.costs:
-        parts.append(
-            f"  (cost={node.costs.startup:.2f}..{node.costs.total:.2f} rows={node.costs.rows} width={node.costs.width})"
-        )
+        cost_range = f"{node.costs.startup:.2f}..{node.costs.total:.2f}"
+
+        if (cost_score := node.cost_score) is not None:
+            cost_colour = Color.from_rgb(*calculate_colour(cost_score))
+            cost_range = f"[bold {cost_colour.name}]{cost_range}[/]"
+
+        parts.append(f"  (cost={cost_range} rows={node.costs.rows} width={node.costs.width})")
 
     if node.actuals:
         actuals_parts = []
         if node.actuals.startup_time is not None and node.actuals.total_time is not None:
-            actuals_parts.append(f"time={node.actuals.startup_time:.3f}..{node.actuals.total_time:.3f}")
+            time_range = f"{node.actuals.startup_time:.3f}..{node.actuals.total_time:.3f}"
+            if (time_score := node.time_score) is not None:
+                time_colour = Color.from_rgb(*calculate_colour(time_score))
+                time_range = f"[bold {time_colour.name}]{time_range}[/]"
+
+            actuals_parts.append(f"time={time_range}")
         actuals_parts.append(f"rows={node.actuals.rows}")
         actuals_parts.append(f"loops={node.actuals.loops}")
         parts.append(f" (actual {' '.join(actuals_parts)})")
