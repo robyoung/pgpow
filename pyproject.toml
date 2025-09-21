@@ -5,7 +5,7 @@ description = "A command line toolkit for working with PostgreSQL."
 readme = "README.md"
 authors = [{name = "Rob Young"}]
 license = {text = "Apache-2.0"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Development Status :: 3 - Alpha",
@@ -18,7 +18,8 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "click"
+    "click",
+    "rich>=14.1.0",
 ]
 
 [build-system]
@@ -37,10 +38,32 @@ pgpow = "pgpow.cli:cli"
 [project.optional-dependencies]
 test = ["pytest"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
+    "ipdb",
+    {include-group = "lint"},
+    {include-group = "test"},
+]
+lint = [
     "mypy>=1.14.1",
-    "pytest",
+    "ruff",
     "types-click>=7.1.8",
-    "ruff"
+]
+test = [
+    "pytest",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # pyflakes
+    "F",
+    # isort
+    "I",
+    # typechecking
+    "TC"
 ]

@@ -1,7 +1,8 @@
+from typing import Literal
+
 import click
 
-
-from typing import Literal
+from pgpow.explain import format_plan, parse_text_plan
 
 
 # Shared options
@@ -122,9 +123,7 @@ def long_running(
 
     where = ""
     if min_query_duration and min_transaction_duration:
-        raise click.UsageError(
-            "Cannot specify both --min-query-duration and --min-transaction-duration"
-        )
+        raise click.UsageError("Cannot specify both --min-query-duration and --min-transaction-duration")
     elif min_query_duration:
         where = f"AND now() - query_start > interval '{min_query_duration}'"
     elif min_transaction_duration:
@@ -292,9 +291,7 @@ def frequent_patterns(limit: int | str, min_calls: int):
 
 @performance.command("indexes-used")
 @limit(10)
-@click.option(
-    "--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes"
-)
+@click.option("--no-pkey", is_flag=True, default=False, help="Exclude primary key indexes")
 def indexes_used(limit: int | str, no_pkey: bool):
     """Most used indexes"""
     _no_pkey = "AND indexrelname NOT ILIKE '%_pkey'" if no_pkey else ""
@@ -381,3 +378,70 @@ def cache_hit_ratio():
     FROM pg_statio_user_tables
     """
     print(query)
+
+
+@cli.group()
+def explain():
+    """Commands related to EXPLAIN and query plans."""
+    pass
+
+
+@explain.command("query")
+@click.argument("query", required=False)
+@click.option(
+    "--json",
+    is_flag=True,
+    default=False,
+    help="Output EXPLAIN in JSON format instead of text",
+)
+def explain_query(query: str | None, json: bool):
+    """Wrap a query with EXPLAIN that can be used with subsequent commands.
+
+    Examples:
+        # Pass the query by argument
+        pgpow explain query "SELECT * FROM my_table WHERE id = 1;"
+
+        # Or pipe the query via stdin
+        echo "SELECT * FROM my_table WHERE id = 1;" | pgpow explain query
+    """
+    if query is None:
+        if not click.get_text_stream("stdin").isatty():
+            query = click.get_text_stream("stdin").read()
+
+    if not query:
+        raise click.UsageError("Query must be provided as an argument or via stdin.")
+
+    options = [
+        "ANALYZE",
+        "BUFFERS",
+    ]
+    if json:
+        options.append("FORMAT JSON")
+
+    ", ".join(options)
+
+    explain_query = f"EXPLAIN ({', '.join(options)}) \n{query}"
+    print(explain_query)
+
+
+@explain.command("format")
+def explain_format():
+    """Format a JSON EXPLAIN output for easier reading.
+
+    Example:
+        pgpow explain query "SELECT * FROM my_table WHERE id = 1;" | \\
+          psql -d mydb | \\
+          pgpow explain format
+    """
+
+    if click.get_text_stream("stdin").isatty():
+        raise click.UsageError("EXPLAIN output must be provided via stdin.")
+
+    explain_raw = click.get_text_stream("stdin").read()
+    plan = parse_text_plan(explain_raw)
+    formatted_plan = format_plan(plan)
+
+    from rich.console import Console
+
+    console = Console(highlight=False)
+    console.print(formatted_plan)
