@@ -147,7 +147,7 @@ def long_running(
 @activity.command()
 @click.option("--min-duration", default=None, help="Minimum blocking duration")
 @click.option("--compact", is_flag=True, help="Show compact view without query text")
-def blocked(min_duration: str, compact: bool):
+def blocked_queries(min_duration: str, compact: bool):
     """Show queries that are currently blocked.
 
     See:
@@ -227,6 +227,57 @@ def locks(pid: int | None, granted: bool | None, compact: bool):
     print(query)
 
 
+@activity.command()
+def blocked_locks():
+    """Find locks that are blocked by another lock.
+
+    See: https://wiki.postgresql.org/wiki/Find_Locks
+    """
+    query = """
+    SELECT
+        blocked.*,
+        blocker.virtualtransaction as blocker_virtualtransaction,
+        blocker.pid as blocker_pid,
+        blocker.mode as blocker_mode,
+        blocker.granted
+    FROM
+        pg_locks blocked
+    JOIN
+        pg_locks blocker on (
+            (
+                blocked.locktype,
+                blocked.database,
+                blocked.relation,
+                blocked.page,
+                blocked.tuple,
+                blocked.virtualxid,
+                blocked.transactionid,
+                blocked.classid,
+                blocked.objid,
+                blocked.objsubid
+            )
+        IS NOT DISTINCT FROM
+            (
+                blocker.locktype,
+                blocker.database,
+                blocker.relation,
+                blocker.page,
+                blocker.tuple,
+                blocker.virtualxid,
+                blocker.transactionid,
+                blocker.classid,
+                blocker.objid,
+                blocker.objsubid
+            )
+        )
+    WHERE
+        NOT blocked.granted
+    AND
+        blocker.granted
+    """
+    print(query)
+
+
 @query.group()
 def maintenance():
     """Database maintenance commands."""
@@ -270,6 +321,72 @@ def table_size(limit: int | str):
     FROM information_schema.tables
     WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')
     ORDER BY pg_total_relation_size(quote_ident(table_schema) || '.' || quote_ident(table_name)) DESC
+    """
+    query = _add_limit(query, limit)
+    print(query)
+
+
+@maintenance.command("schema-size")
+@click.option("--pretty/--no-pretty", is_flag=True, default=True, help="Show size in human-readable format")
+@click.option("--schema", help="Schema to check size for")
+@click.option("--by-schema", is_flag=True, default=False, help="Show size by schema")
+def size_of_schema(pretty: bool, schema: str | None, by_schema: bool):
+    """Show the size of a specific schema or all schemas
+
+    See: https://wiki.postgresql.org/wiki/Schema_Size
+    """
+    query = "SELECT\n"
+    if by_schema:
+        query += "  schemaname,\n"
+    sum_part = "SUM(pg_total_relation_size(quote_ident(schemaname) || '.' || quote_ident(tablename)))"
+    if pretty:
+        sum_part = f"pg_size_pretty({sum_part})"
+    query += f"  {sum_part} AS total_size\n"
+    query += "FROM pg_tables\n"
+    if schema:
+        query += f"WHERE schemaname = '{schema}'\n"
+    if by_schema:
+        query += "GROUP BY schemaname\n"
+        query += "ORDER BY schemaname\n"
+    print(query)
+
+
+@maintenance.command("useless-columns")
+@limit(10)
+def useless_columns(limit: int | str):
+    """Find columns that have no more than 1 distinct value
+
+    See: https://wiki.postgresql.org/wiki/Finding_useless_columns
+    """
+    query = """
+    SELECT
+        nspname, relname, attname, typname,
+        (stanullfrac * 100) :: int AS null_percent,
+        CASE
+            WHEN stadistinct >= 0 THEN stadistinct
+            ELSE abs(stadistinct) * reltuples
+        END AS "distinct",
+        CASE
+            1
+            WHEN stakind1 THEN stavalues1
+            WHEN stakind2 THEN stavalues2
+        END AS "values"
+    FROM
+        pg_class c
+        JOIN pg_namespace ns ON (ns.oid = relnamespace)
+        JOIN pg_attribute ON (c.oid = attrelid)
+        JOIN pg_type t ON (t.oid = atttypid)
+        JOIN pg_statistic ON (c.oid = starelid AND staattnum = attnum)
+    WHERE
+        nspname NOT LIKE E 'pg\\_%'
+        AND nspname != 'information_schema'
+        AND relkind = 'r'
+        AND NOT attisdropped
+        AND attstattarget != 0
+        AND reltuples >= 100 -- ignore tables with fewer than 100 rows
+        AND stadistinct BETWEEN 0
+        AND 1 -- 0 to 1 distinct values
+    ORDER BY nspname, relname, attname
     """
     query = _add_limit(query, limit)
     print(query)
